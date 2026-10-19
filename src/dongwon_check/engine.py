@@ -382,6 +382,10 @@ class Affiliation:
     store_source: str = ""  # 어디서 찾았는지(시트 이름 등)
     supplier: str = ""  # 공급처 열의 대표값(예: 동원F&B직거래)
 
+    def short_name(self) -> str:
+        """탭·시트 이름에 쓸 짧은 소속명: '(주)세종마트 경산점' → '세종마트 경산점'."""
+        return re.sub(r"\(주\)|㈜|주식회사|\(유\)", "", self.store).strip()
+
     def label(self) -> str:
         parts = []
         if self.store:
@@ -641,6 +645,11 @@ class Summary:
         return sum(self.counts.values())
 
     @property
+    def to_check(self) -> int:
+        """사람이 확인해야 할 줄(일치가 아닌 줄) 수."""
+        return self.total - self.counts.get("일치", 0)
+
+    @property
     def match_rate(self) -> float:
         return self.counts.get("일치", 0) / self.total if self.total else 0.0
 
@@ -760,7 +769,7 @@ def compare(
 
 
 def mismatch_warning(lrecs: list[Record], vrecs: list[Record], summary: Summary, customer: str | None) -> str:
-    """일치율이 매우 낮으면, 날짜를 빼고 바코드별 수량 합계로도 맞는지 봐서 '다른 매장 자료' 가능성을 알린다."""
+    """맞는 줄이 거의 없으면(5% 미만), 날짜를 빼고 바코드별 수량 합계로도 맞는지 봐서 '다른 매장 자료' 가능성을 알린다."""
     if summary.total < 20 or summary.match_rate >= 0.05:
         return ""
     lq: dict[str, float] = defaultdict(float)
@@ -773,7 +782,7 @@ def mismatch_warning(lrecs: list[Record], vrecs: list[Record], summary: Summary,
     same = sum(1 for k in common if abs(lq[k] - vq[k]) < 1e-9)
     who = customer or (lrecs[0].customer if lrecs else "")
     return (
-        f"일치율이 {summary.match_rate:.1%}로 매우 낮습니다. 날짜를 무시하고 바코드별 수량 합계로 봐도 "
+        f"{summary.total:,}줄 중 맞는 줄이 {summary.counts.get('일치', 0)}줄뿐입니다. 날짜를 무시하고 바코드별 수량 합계로 봐도 "
         f"{len(vq)}종 중 {same}종만 같아, 원장 판매처({who})와 다른 매장의 자료일 가능성이 큽니다. "
         "같은 매장의 원장인지, 기간이 같은지 확인해 주세요."
     )

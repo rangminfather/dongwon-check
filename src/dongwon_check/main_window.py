@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
+import sys
 import threading
 import traceback
 from dataclasses import dataclass
@@ -22,6 +24,10 @@ from .version import APP_NAME, ORG_NAME, __version__
 from .widgets import Card, DropZone, Emblem, HeaderBar, Kpi, ResultFilter, ResultModel
 
 FILE_FILTER = "엑셀 파일 (*.xlsx *.xlsm *.xls)"
+
+
+def safe_file_part(name: str) -> str:
+    return re.sub(r'[\\/:*?"<>|]', "_", name)
 
 
 @dataclass
@@ -75,7 +81,9 @@ class VendorRow(QFrame):
         lay.setSpacing(6)
 
         top = QHBoxLayout()
-        name = QLabel(os.path.basename(item.path))
+        fname = os.path.basename(item.path)
+        name = QLabel(f"{item.label}  <span style='color:{theme.MUTED}; font-weight:400; font-size:9pt'>{fname}</span>"
+                      if item.label != os.path.splitext(fname)[0] else fname)
         name.setObjectName("fileName")
         name.setToolTip(item.path)
         top.addWidget(name, 1)
@@ -200,8 +208,9 @@ class ResultPanel(QWidget):
 
         kpis = QHBoxLayout()
         kpis.setSpacing(10)
-        rate = Kpi("일치율", theme.BLUE, theme.SKY_LIGHT)
-        rate.set(f"{s.match_rate * 100:.1f}%", f"총 {s.total:,}건 중 {s.counts['일치']:,}건")
+        need = s.to_check
+        rate = Kpi("확인할 줄", "#C62828" if need else "#1E7B3A", "#FFF5F5" if need else "#EEF8F1")
+        rate.set(f"{need:,}건" if need else "없음 ✔", f"전체 {s.total:,}줄 · 일치 {s.counts['일치']:,}줄")
         kpis.addWidget(rate)
         for title, lv, vv in (("총수량", s.l_qty, s.v_qty), ("공급가 금액", s.l_amt, s.v_amt)):
             k = Kpi(f"{title} 차이 (동원−거래처)", "#C62828" if abs(lv - vv) > 1 else "#1E7B3A")
@@ -341,6 +350,12 @@ class MainWindow(QMainWindow):
         upd.setCursor(Qt.PointingHandCursor)
         upd.clicked.connect(lambda: self.check_update(manual=True))
         lay.addWidget(upd)
+        if self._uninstaller():
+            rm = QPushButton("프로그램 제거")
+            rm.setObjectName("ghost")
+            rm.setCursor(Qt.PointingHandCursor)
+            rm.clicked.connect(self.uninstall)
+            lay.addWidget(rm)
         hlp = QPushButton("도움말")
         hlp.setObjectName("ghost")
         hlp.setCursor(Qt.PointingHandCursor)
@@ -546,8 +561,11 @@ class MainWindow(QMainWindow):
                     continue
                 problems.append(f"{os.path.basename(path)}: 바코드·수량·금액 열을 찾지 못했습니다")
                 continue
-            label = self._unique_label(os.path.splitext(os.path.basename(path))[0])
-            item = VendorItem(path, label, vend, vend[0]["sheet"], aff=vend[0].get("aff"))
+            aff = vend[0].get("aff")
+            # 소속이 감지되면 '양식1' 같은 파일 이름 대신 소속명으로 부른다(탭·시트·저장 파일 이름).
+            base = (aff.short_name() if aff and aff.store else "") or os.path.splitext(os.path.basename(path))[0]
+            label = self._unique_label(base)
+            item = VendorItem(path, label, vend, vend[0]["sheet"], aff=aff)
             self._parse_vendor(item)
             self.vendors.append(item)
             self.settings.setValue("last_dir", os.path.dirname(path))
@@ -637,7 +655,7 @@ class MainWindow(QMainWindow):
         self.tabs.clear()
         for res in self.results:
             s = res.summary
-            self.tabs.addTab(ResultPanel(res), f"{'⚠ ' if res.warning else ''}{res.label}   {s.match_rate * 100:.1f}%")
+            self.tabs.addTab(ResultPanel(res), f"{'⚠ ' if res.warning else ''}{res.label}   확인 {s.to_check:,}")
         self.empty.hide()
         self.tabs.show()
         self._save_options()
@@ -655,7 +673,7 @@ class MainWindow(QMainWindow):
                     return
                 QApplication.setOverrideCursor(Qt.WaitCursor)
                 saved = [
-                    exporter.export(os.path.join(folder, f"{stem}_비교_{res.label}.xlsx"), self.ledger, self.ledger_path,
+                    exporter.export(os.path.join(folder, f"{stem}_비교_{safe_file_part(res.label)}.xlsx"), self.ledger, self.ledger_path,
                                     [res], self.tol.value(), self.win.value())
                     for res in self.results
                 ]
@@ -754,6 +772,27 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=work, daemon=True).start()
 
+    # ----- 제거 ------------------------------------------------------------
+
+    @staticmethod
+    def _uninstaller() -> str:
+        """설치본으로 실행 중이면 제거 프로그램 경로(개발 실행 중이면 빈 문자열)."""
+        if not getattr(sys, "frozen", False):
+            return ""
+        path = os.path.join(os.path.dirname(sys.executable), "unins000.exe")
+        return path if os.path.exists(path) else ""
+
+    def uninstall(self):
+        if QMessageBox.question(
+            self, "프로그램 제거",
+            "동원 매입대사를 이 PC에서 제거할까요?\n(만들어 둔 결과 엑셀 파일은 지워지지 않습니다)",
+        ) != QMessageBox.Yes:
+            return
+        import subprocess
+
+        subprocess.Popen([self._uninstaller()], close_fds=True)
+        QApplication.quit()
+
     # ----- 기타 ------------------------------------------------------------
 
     def show_help(self):
@@ -770,6 +809,8 @@ class MainWindow(QMainWindow):
             "· 같은 일자+바코드는 합산, 일자가 달라도 ±N일 안이면 한 줄로 묶음<br>"
             "· 수량이 다르면 <b>수량차이</b>, 수량은 같고 금액이 다르면 <b>단가차이</b><br>"
             "· 한쪽에만 있으면 <b>동원만 / 거래처만</b></p>"
+            "<p><b>제거</b> — 위쪽 [프로그램 제거] 버튼, 또는 시작 메뉴 › 동원 매입대사 › 동원 매입대사 제거, "
+            "또는 Windows 설정 › 앱 › 설치된 앱에서 제거할 수 있습니다. 결과 엑셀 파일은 남습니다.</p>"
             "<p>문의·개선 요청은 개발 담당자에게 알려 주세요.</p>",
         )
 

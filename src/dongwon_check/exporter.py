@@ -104,7 +104,7 @@ def _write_compare(ws, fmts: _Formats, res: CompareResult, ledger_name: str, tol
     rng = lambda col: f"{col}{first + 1}:{col}{last + 1}"  # noqa: E731
 
     period = "기간 합계" if res.mode == "period" else "일자별"
-    ws.write(0, 0, f"동원 원장 vs 거래처 매입 비교 — {res.label} ({period})", fmts.title)
+    ws.write(0, 0, f"동원 원장 vs {res.label} 매입 비교 ({period})", fmts.title)
     ws.write(1, 0, CRITERIA.format(tol=tol), fmts.subtitle)
     ws.write(2, 0, CRITERIA2.format(win=win) if res.mode == "daily" else "※ 날짜가 없는 양식이라 바코드별 기간 합계로 비교", fmts.subtitle)
 
@@ -192,22 +192,21 @@ def _write_summary(ws, fmts: _Formats, results: list[CompareResult], ledger: Par
     ws.write(0, 0, f"{ORG_NAME} 매입대사 결과", fmts.title)
     ws.write(1, 0, f"{branch + ' · ' if branch else ''}기준 원장: {os.path.basename(ledger_path)}  ·  "
                    f"작성 {dt.datetime.now():%Y-%m-%d %H:%M}  ·  {APP_NAME} v{__version__}", fmts.subtitle)
-    heads = ["거래처 파일", "시트", "원장 판매처", "방식", "총 건수", *STATUSES, "일치율",
+    heads = ["거래처(소속)", "파일 · 시트", "원장 판매처", "방식", "총 건수", *STATUSES, "확인 필요",
              "동원 금액", "거래처 금액", "금액차", "참고", "거래처 소속(감지)"]
     ws.write_row(3, 0, heads, fmts.head)
     ws.set_row(3, 22)
     for i, res in enumerate(results):
         r = 4 + i
         s = res.summary
-        ws.write_url(r, 0, f"internal:'{sheet_of[res.label]}'!A1", fmts.link, string=os.path.basename(res.vendor_file))
-        ws.write(r, 1, res.vendor_sheet, fmts.cell)
+        ws.write_url(r, 0, f"internal:'{sheet_of[res.label]}'!A1", fmts.link, string=res.label)
+        ws.write(r, 1, f"{os.path.basename(res.vendor_file)} › {res.vendor_sheet}", fmts.cell)
         ws.write(r, 2, res.customer or "(전체)", fmts.cell)
         ws.write(r, 3, "기간합계" if res.mode == "period" else "일자별", fmts.cell)
         ws.write_number(r, 4, s.total, fmts.sum_int)
         for j, st in enumerate(STATUSES):
             ws.write_number(r, 5 + j, s.counts[st], fmts.sum_int)
-        ws.write_formula(r, 10, f"=IF({xl_rowcol_to_cell(r, 4)}=0,0,{xl_rowcol_to_cell(r, 5)}/{xl_rowcol_to_cell(r, 4)})",
-                         fmts.pct, s.match_rate)
+        ws.write_formula(r, 10, f"={xl_rowcol_to_cell(r, 4)}-{xl_rowcol_to_cell(r, 5)}", fmts.sum_int, s.to_check)
         ws.write_number(r, 11, s.l_amt, fmts.sum_int)
         ws.write_number(r, 12, s.v_amt, fmts.sum_int)
         ws.write_number(r, 13, s.l_amt - s.v_amt, fmts.sum_int)
@@ -216,7 +215,7 @@ def _write_summary(ws, fmts: _Formats, results: list[CompareResult], ledger: Par
     for col, w in zip(range(16), [28, 18, 22, 8, 8, 8, 9, 9, 8, 9, 8, 14, 14, 12, 70, 40]):
         ws.set_column(col, col, w)
     ws.freeze_panes(4, 1)
-    ws.write(6 + len(results), 0, "※ 파일 이름을 누르면 해당 비교 시트로 이동합니다. 행 색: "
+    ws.write(6 + len(results), 0, "※ 거래처 이름을 누르면 해당 비교 시트로 이동합니다(소속이 감지되면 파일 이름 대신 소속명으로 표시). 행 색: "
                                   "노랑=수량차이 · 주황=단가차이 · 파랑=동원만 · 보라=거래처만", fmts.note)
 
 

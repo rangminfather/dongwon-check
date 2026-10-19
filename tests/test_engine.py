@@ -169,3 +169,8 @@ def test_affiliation_detection():
     V = E.parse_vendor(vendor_footer_rows(), period=(2026, 9))
     res = E.compare(L, V, label="t", affiliation=aff)
     assert "영해식자재" in res.warning and res.affiliation.supplier == "(주)동원F&B"
+
+
+def test_short_name_for_labels():
+    assert E.Affiliation(store="(주)세종마트 경산점").short_name() == "세종마트 경산점"
+    assert E.Affiliation(store="주식회사 지마트유통센터").short_name() == "지마트유통센터"
