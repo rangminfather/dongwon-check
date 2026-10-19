@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+.pytest_cache/
+assets/
+# 원장·거래처 자료(거래처·영업 정보)는 절대 올리지 않는다
+*.xlsx
+*.xls
+*.xlsm
+~$*
