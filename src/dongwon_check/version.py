@@ -1,6 +1,6 @@
 """앱 버전·업데이트 채널 정보 (릴리스할 때 __version__ 만 올리면 된다)."""
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 APP_NAME = "동원 매입대사"
 APP_NAME_EN = "DongwonCheck"
