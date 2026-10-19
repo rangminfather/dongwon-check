@@ -22,7 +22,7 @@ $log = $log.Substring(0, $i) + $entry + "`n`n" + $log.Substring($i)
 [IO.File]::WriteAllText("CHANGELOG.md", $log, (New-Object Text.UTF8Encoding $false))
 
 git add $vf CHANGELOG.md
-git commit -m "v$Version: $Note"
+git commit -m "v${Version}: $Note"
 git tag "v$Version"
 git push origin HEAD
 git push origin "v$Version"
