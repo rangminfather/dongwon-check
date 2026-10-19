@@ -10,3 +10,4 @@ assets/
 *.xls
 *.xlsm
 ~$*
+packaging/art/preview.png

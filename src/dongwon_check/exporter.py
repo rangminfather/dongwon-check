@@ -68,6 +68,7 @@ class _Formats:
         self.rows = f(font_color="#8C8C8C", font_size=9)
         self.sum_int = f(num_format="#,##0;[Red]-#,##0;-", border=1, border_color="#E1E6EF")
         self.link = f(font_color=SKY, underline=1)
+        self.warn = f(font_color="#A8071A", bold=True)
         self.status = {s: wb.add_format({"bg_color": c}) for s, c in STATUS_FILL.items()}
         self.chip = {s: f(bg_color=c, bold=True, align="center", border=1, border_color="#E1E6EF")
                      for s, c in STATUS_FILL.items()}
@@ -127,8 +128,13 @@ def _write_compare(ws, fmts: _Formats, res: CompareResult, ledger_name: str, tol
     ws.write(4, 9, ledger_name)
     ws.write(5, 8, "원장 판매처", fmts.label)
     ws.write(5, 9, res.customer or "(전체)")
+    ws.write(3, 11, "거래처 소속(감지)", fmts.label)
+    ws.write(3, 12, res.affiliation.label() or "감지 안 됨")
     ws.write(6, 8, "참고", fmts.label)
     ws.write(6, 9, " · ".join(n for n in res.notes), fmts.note)
+    if res.warning:
+        ws.write(7, 8, "⚠ 확인", fmts.label)
+        ws.write(7, 9, res.warning, fmts.warn)
 
     headers = ["일자", "바코드", "상품명", "동원\n총수량", "동원\n단가", "동원\n금액", "거래처\n총수량", "거래처\n단가",
                "거래처\n금액", "수량차\n(동원-거래처)", "금액차\n(동원-거래처)", "비고", "거래처\n일자", "메모",
@@ -187,7 +193,7 @@ def _write_summary(ws, fmts: _Formats, results: list[CompareResult], ledger: Par
     ws.write(1, 0, f"{branch + ' · ' if branch else ''}기준 원장: {os.path.basename(ledger_path)}  ·  "
                    f"작성 {dt.datetime.now():%Y-%m-%d %H:%M}  ·  {APP_NAME} v{__version__}", fmts.subtitle)
     heads = ["거래처 파일", "시트", "원장 판매처", "방식", "총 건수", *STATUSES, "일치율",
-             "동원 금액", "거래처 금액", "금액차", "참고"]
+             "동원 금액", "거래처 금액", "금액차", "참고", "거래처 소속(감지)"]
     ws.write_row(3, 0, heads, fmts.head)
     ws.set_row(3, 22)
     for i, res in enumerate(results):
@@ -205,8 +211,9 @@ def _write_summary(ws, fmts: _Formats, results: list[CompareResult], ledger: Par
         ws.write_number(r, 11, s.l_amt, fmts.sum_int)
         ws.write_number(r, 12, s.v_amt, fmts.sum_int)
         ws.write_number(r, 13, s.l_amt - s.v_amt, fmts.sum_int)
-        ws.write(r, 14, " · ".join(res.notes), fmts.note)
-    for col, w in zip(range(15), [28, 18, 22, 8, 8, 8, 9, 9, 8, 9, 8, 14, 14, 12, 70]):
+        ws.write(r, 14, " · ".join(([f"⚠ {res.warning}"] if res.warning else []) + res.notes), fmts.warn if res.warning else fmts.note)
+        ws.write(r, 15, res.affiliation.label())
+    for col, w in zip(range(16), [28, 18, 22, 8, 8, 8, 9, 9, 8, 9, 8, 14, 14, 12, 70, 40]):
         ws.set_column(col, col, w)
     ws.freeze_panes(4, 1)
     ws.write(6 + len(results), 0, "※ 파일 이름을 누르면 해당 비교 시트로 이동합니다. 행 색: "

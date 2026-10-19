@@ -155,3 +155,17 @@ def test_matches_manual_result():
     assert res.summary.counts == {"일치": 235, "수량차이": 91, "단가차이": 239, "동원만": 140, "거래처만": 76}
     assert res.summary.l_amt == pytest.approx(30372613)
     assert res.summary.v_amt == pytest.approx(30243213.6)
+    assert res.warning == ""  # 같은 매장 자료는 경고 없음
+
+
+def test_affiliation_detection():
+    sheets = {"매입상세내역": vendor_grouped_rows(), "2609 영해식자재 잔액": [[None]]}
+    aff = E.detect_affiliation("양식4.xlsx", sheets)
+    assert (aff.store, aff.store_source) == ("영해식자재", "'2609 영해식자재 잔액' 시트 이름")
+    assert E.detect_affiliation("양식1.xlsx", {"x": vendor_grouped_rows()}).store == ""  # 일반적인 파일 이름은 무시
+    assert E.same_store("세종경산", "(주)세종마트 경산점")
+    assert not E.same_store("영해식자재", "주식회사 지마트유통센터")
+    L = E.parse_ledger(ledger_rows())
+    V = E.parse_vendor(vendor_footer_rows(), period=(2026, 9))
+    res = E.compare(L, V, label="t", affiliation=aff)
+    assert "영해식자재" in res.warning and res.affiliation.supplier == "(주)동원F&B"

@@ -13,7 +13,7 @@ from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressDialog, QPushButton,
-    QRadioButton, QScrollArea, QSpinBox, QSplitter, QTableView, QTabWidget, QVBoxLayout, QWidget,
+    QRadioButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableView, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from . import engine as E
@@ -33,6 +33,7 @@ class VendorItem:
     parsed: E.ParseResult | None = None
     customer: str = "auto"  # "auto" | "" (원장 전체) | 판매처명
     error: str = ""
+    aff: E.Affiliation | None = None
 
 
 def busy(fn):
@@ -113,6 +114,7 @@ class VendorRow(QFrame):
         lay.addWidget(self.info)
         self.set_customers(customers)
         self.refresh()
+        self.setMinimumHeight(self.sizeHint().height())  # 목록이 길어져도 줄이 눌려 찌그러지지 않게
 
     @staticmethod
     def _muted(t):
@@ -142,7 +144,16 @@ class VendorRow(QFrame):
             return
         dates = [r.date for r in p.records if r.date]
         span = f" · {min(dates):%m/%d}~{max(dates):%m/%d}" if dates else " · 날짜 없음(기간 합계)"
-        self.info.setText(f"{len(p.records):,}행 인식{span}<br>" + " · ".join(p.notes[1:] or [p.notes[0].split('·')[-1].strip()]))
+        aff = it.aff or E.Affiliation()
+        supplier = aff.supplier or E.supplier_of(p)
+        who = []
+        if aff.store:
+            who.append(f"🏪 <b style='color:{theme.BLUE}'>{aff.store}</b> <span style='color:#98A2B3'>({aff.store_source})</span>")
+        if supplier:
+            who.append(f"공급처 {supplier}")
+        head = (" · ".join(who) + "<br>") if who else ""
+        self.info.setText(head + f"{len(p.records):,}행 인식{span}<br>"
+                          + " · ".join(p.notes[1:] or [p.notes[0].split('·')[-1].strip()]))
 
     def _on_sheet(self):
         self.item.sheet = self.sheet.currentData()
@@ -166,6 +177,26 @@ class ResultPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 12, 0, 0)
         lay.setSpacing(10)
+
+        aff = res.affiliation
+        if aff.store or aff.supplier:
+            who = QLabel(
+                (f"🏪 거래처 소속: <b>{aff.store}</b> <span style='color:#6B7689'>({aff.store_source})</span>" if aff.store
+                 else "🏪 거래처 소속: <span style='color:#6B7689'>감지 안 됨</span>")
+                + (f"  ·  공급처 {aff.supplier}" if aff.supplier else "")
+                + f"  ·  원장 판매처 <b>{res.customer or (res.ledger_rows_used[0].customer if res.ledger_rows_used else '-')}</b>")
+            who.setStyleSheet(f"color:{theme.TEXT};")
+            who.setWordWrap(True)
+            who.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            lay.addWidget(who)
+
+        if res.warning:
+            warn = QLabel(f"⚠  {res.warning}")
+            warn.setWordWrap(True)
+            warn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)  # 긴 문장이 화면을 밀어내지 않게
+            warn.setStyleSheet("background:#FFF1F0; color:#A8071A; border:1px solid #FFA39E; border-radius:10px;"
+                               "padding:10px 14px; font-weight:600;")
+            lay.addWidget(warn)
 
         kpis = QHBoxLayout()
         kpis.setSpacing(10)
@@ -230,6 +261,7 @@ class ResultPanel(QWidget):
         note = QLabel(" · ".join(res.notes))
         note.setObjectName("muted")
         note.setWordWrap(True)
+        note.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         lay.addWidget(note)
 
 
@@ -515,7 +547,7 @@ class MainWindow(QMainWindow):
                 problems.append(f"{os.path.basename(path)}: 바코드·수량·금액 열을 찾지 못했습니다")
                 continue
             label = self._unique_label(os.path.splitext(os.path.basename(path))[0])
-            item = VendorItem(path, label, vend, vend[0]["sheet"])
+            item = VendorItem(path, label, vend, vend[0]["sheet"], aff=vend[0].get("aff"))
             self._parse_vendor(item)
             self.vendors.append(item)
             self.settings.setValue("last_dir", os.path.dirname(path))
@@ -596,7 +628,8 @@ class MainWindow(QMainWindow):
             self.results = [
                 E.compare(self.ledger, it.parsed, label=it.label, vendor_file=it.path,
                           customer=it.customer if it.customer != "" else None,
-                          window_days=self.win.value(), tolerance=self.tol.value(), clip_to_ledger=self.clip.isChecked())
+                          window_days=self.win.value(), tolerance=self.tol.value(), clip_to_ledger=self.clip.isChecked(),
+                          affiliation=it.aff)
                 for it in self.vendors if it.parsed
             ]
         except Exception as e:  # noqa: BLE001
@@ -604,7 +637,7 @@ class MainWindow(QMainWindow):
         self.tabs.clear()
         for res in self.results:
             s = res.summary
-            self.tabs.addTab(ResultPanel(res), f"{res.label}   {s.match_rate * 100:.0f}%")
+            self.tabs.addTab(ResultPanel(res), f"{'⚠ ' if res.warning else ''}{res.label}   {s.match_rate * 100:.1f}%")
         self.empty.hide()
         self.tabs.show()
         self._save_options()

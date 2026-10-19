@@ -374,17 +374,100 @@ def parse_vendor(rows: list[list], sheet: str = "", period: tuple[int, int] | No
     return ParseResult("vendor", sheet, recs, cols, hdr_idx + 1, notes, list(header), rows[start:], rows)
 
 
+@dataclass
+class Affiliation:
+    """거래처 파일에서 감지한 소속(매장) 정보. 못 찾으면 빈 문자열."""
+
+    store: str = ""
+    store_source: str = ""  # 어디서 찾았는지(시트 이름 등)
+    supplier: str = ""  # 공급처 열의 대표값(예: 동원F&B직거래)
+
+    def label(self) -> str:
+        parts = []
+        if self.store:
+            parts.append(f"{self.store} ({self.store_source})")
+        if self.supplier:
+            parts.append(f"공급처 {self.supplier}")
+        return " · ".join(parts)
+
+
+_BALANCE_SHEET_RE = re.compile(r"^\s*\d{4}\s*(.+?)\s*잔액\s*$")
+_STORE_CELL_RE = re.compile(r"(매장|업체|거래처|상호|점포)명?\s*[:：]\s*([^\s:：][^:：]{1,30})$")
+_GENERIC_FILE_RE = re.compile(r"^(양식|form|매입|거래처|원장|동원|새|sheet|book|통합 문서)\s*\d*", re.I)
+
+
+def _norm_store(name: str) -> str:
+    n = re.sub(r"\(주\)|㈜|주식회사|\s", "", name)
+    return n.replace("마트", "").replace("점", "")
+
+
+def same_store(a: str, b: str) -> bool:
+    """'세종경산'과 '(주)세종마트 경산점'처럼 표기가 달라도 같은 매장으로 본다."""
+    x, y = _norm_store(a), _norm_store(b)
+    if not x or not y:
+        return False
+    if x in y or y in x:
+        return True
+    # 글자 2-gram 겹침 비율
+    g = lambda t: {t[i:i + 2] for i in range(len(t) - 1)}  # noqa: E731
+    gx, gy = g(x), g(y)
+    return bool(gx and gy) and len(gx & gy) / min(len(gx), len(gy)) >= 0.6
+
+
+def detect_affiliation(path: str, sheets: dict[str, list[list]]) -> Affiliation:
+    aff = Affiliation()
+    # ① 함께 들어 있는 원장 시트의 판매처명(가장 확실)
+    for name, rows in sheets.items():
+        if rows and looks_like_ledger(rows):
+            try:
+                c = Counter(r.customer for r in parse_ledger(rows).records if r.customer)
+            except Exception:
+                continue
+            if c:
+                aff.store, aff.store_source = c.most_common(1)[0][0], f"'{name}' 시트 원장"
+                break
+    # ② 'YYMM 매장명 잔액' 같은 시트 이름
+    if not aff.store:
+        for name in sheets:
+            m = _BALANCE_SHEET_RE.match(name)
+            if m:
+                aff.store, aff.store_source = m.group(1), f"'{name}' 시트 이름"
+                break
+    # ③ 위쪽 행의 '매장명 : ○○' 같은 칸
+    if not aff.store:
+        for name, rows in sheets.items():
+            for row in rows[:6]:
+                for v in row:
+                    m = _STORE_CELL_RE.search(as_text(v)) if isinstance(v, str) else None
+                    if m:
+                        aff.store, aff.store_source = m.group(2).strip(), f"'{name}' 시트 머리글"
+                        break
+                if aff.store:
+                    break
+            if aff.store:
+                break
+    # ④ 파일 이름(양식1 처럼 일반적인 이름은 제외)
+    if not aff.store:
+        stem = os.path.splitext(os.path.basename(path))[0]
+        if not _GENERIC_FILE_RE.match(stem) and not re.fullmatch(r"[\d_\- ()]+", stem):
+            aff.store, aff.store_source = stem, "파일 이름"
+    return aff
+
+
 def inspect_workbook(path: str) -> list[dict]:
     """시트별로 원장/거래처 양식 여부를 판정해 후보 목록을 돌려준다.
 
     거래처 후보는 날짜가 있고, 공급가(또는 부가세)를 알 수 있고, 행이 많은 순으로 정렬한다.
+    각 후보에는 파일에서 감지한 소속(aff)이 함께 들어간다.
     """
+    sheets = load_workbook_rows(path)
+    aff = detect_affiliation(path, sheets)
     ledgers, vendors = [], []
-    for name, rows in load_workbook_rows(path).items():
+    for name, rows in sheets.items():
         if not rows:
             continue
         if looks_like_ledger(rows):
-            ledgers.append({"sheet": name, "kind": "ledger", "rows": rows})
+            ledgers.append({"sheet": name, "kind": "ledger", "rows": rows, "aff": aff})
             continue
         try:
             res = parse_vendor(rows, name)
@@ -394,9 +477,14 @@ def inspect_workbook(path: str) -> list[dict]:
             dated = sum(1 for r in res.records if r.date) / len(res.records)
             exact = bool({"supply", "vat"} & res.columns.keys())
             vendors.append({"sheet": name, "kind": "vendor", "rows": rows, "count": len(res.records),
-                            "rank": (dated > 0.5, exact, len(res.records))})
+                            "rank": (dated > 0.5, exact, len(res.records)), "aff": aff})
     vendors.sort(key=lambda c: c["rank"], reverse=True)
     return vendors + ledgers
+
+
+def supplier_of(vendor: "ParseResult") -> str:
+    c = Counter(r.extra.get("supplier") for r in vendor.records if r.extra.get("supplier"))
+    return c.most_common(1)[0][0] if c else ""
 
 
 # ---------------------------------------------------------------------------
@@ -602,6 +690,8 @@ class CompareResult:
     notes: list[str]
     vendor: ParseResult
     ledger_rows_used: list[Record]
+    warning: str = ""  # 자료 짝이 맞지 않아 보일 때 화면 상단에 띄울 경고
+    affiliation: "Affiliation" = field(default_factory=lambda: Affiliation())
 
 
 def compare(
@@ -614,6 +704,7 @@ def compare(
     window_days: int = 3,
     tolerance: float = 1.0,
     clip_to_ledger: bool = True,
+    affiliation: Affiliation | None = None,
 ) -> CompareResult:
     """원장과 거래처 자료 하나를 대사한다.
 
@@ -655,4 +746,34 @@ def compare(
 
     if not vrecs:
         notes.append("⚠ 비교할 거래처 행이 없습니다(기간·판매처를 확인하세요)")
-    return CompareResult(label, vendor_file, vendor.sheet, customer, mode, rows, summarize(rows), notes, vendor, lrecs)
+    summary = summarize(rows)
+    aff = Affiliation(**vars(affiliation)) if affiliation else Affiliation()
+    aff.supplier = aff.supplier or supplier_of(vendor)
+    who = customer or (lrecs[0].customer if lrecs else "")
+    warning = mismatch_warning(lrecs, vrecs, summary, customer)
+    # 파일 이름으로만 짐작한 소속은 경고 근거로 쓰지 않는다(표시만).
+    if aff.store and aff.store_source != "파일 이름" and who and not same_store(aff.store, who):
+        warning = (f"거래처 자료는 '{aff.store}'({aff.store_source})로 보이는데 원장 판매처는 '{who}'입니다. "
+                   + (warning or "같은 매장 자료인지 확인해 주세요."))
+    return CompareResult(label, vendor_file, vendor.sheet, customer, mode, rows, summary, notes, vendor, lrecs,
+                         warning, aff)
+
+
+def mismatch_warning(lrecs: list[Record], vrecs: list[Record], summary: Summary, customer: str | None) -> str:
+    """일치율이 매우 낮으면, 날짜를 빼고 바코드별 수량 합계로도 맞는지 봐서 '다른 매장 자료' 가능성을 알린다."""
+    if summary.total < 20 or summary.match_rate >= 0.05:
+        return ""
+    lq: dict[str, float] = defaultdict(float)
+    vq: dict[str, float] = defaultdict(float)
+    for r in lrecs:
+        lq[r.key] += r.qty
+    for r in vrecs:
+        vq[r.key] += r.qty
+    common = set(lq) & set(vq)
+    same = sum(1 for k in common if abs(lq[k] - vq[k]) < 1e-9)
+    who = customer or (lrecs[0].customer if lrecs else "")
+    return (
+        f"일치율이 {summary.match_rate:.1%}로 매우 낮습니다. 날짜를 무시하고 바코드별 수량 합계로 봐도 "
+        f"{len(vq)}종 중 {same}종만 같아, 원장 판매처({who})와 다른 매장의 자료일 가능성이 큽니다. "
+        "같은 매장의 원장인지, 기간이 같은지 확인해 주세요."
+    )
