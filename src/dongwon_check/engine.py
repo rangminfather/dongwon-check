@@ -12,6 +12,7 @@ import os
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Decimal
 
 # ---------------------------------------------------------------------------
 # 파일 읽기
@@ -105,6 +106,11 @@ def barcode_key(code: str) -> str:
 
 def display_barcode(key: str) -> str:
     return key + ean_check_digit(key) if len(key) == 12 and key.isdigit() else key
+
+
+def round_won(v: float) -> float:
+    """소수점 첫째 자리에서 반올림(사사오입, 음수는 0에서 먼 쪽 — 엑셀 ROUND와 같음)."""
+    return float(Decimal(repr(v)).quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
 def to_number(v) -> float | None:
@@ -230,7 +236,7 @@ def parse_ledger(rows: list[list], sheet: str = "") -> ParseResult:
         if not code:
             continue
         qty = to_number(g("qty")) or 0.0
-        amt = to_number(g("supply")) or 0.0
+        amt = round_won(to_number(g("supply")) or 0.0)
         if qty == 0 and amt == 0:
             skipped += 1
             continue
@@ -347,6 +353,7 @@ def parse_vendor(rows: list[list], sheet: str = "", period: tuple[int, int] | No
             amt = to_number(g("supply")) or 0.0
         else:
             amt = (to_number(g("gross")) or 0.0) - (to_number(g("vat")) or 0.0)
+        amt = round_won(amt)  # 공급가액이 8,683.64처럼 소수로 온 양식도 원 단위로 맞춘다
         if qty == 0 and amt == 0:
             zero_rows += 1
             continue
@@ -529,11 +536,11 @@ class ResultRow:
 
     @property
     def l_unit(self):
-        return self.l_amt / self.l_qty if self.l_qty else None
+        return round_won(self.l_amt / self.l_qty) if self.l_qty else None
 
     @property
     def v_unit(self):
-        return self.v_amt / self.v_qty if self.v_qty else None
+        return round_won(self.v_amt / self.v_qty) if self.v_qty else None
 
     @property
     def qty_diff(self) -> float:

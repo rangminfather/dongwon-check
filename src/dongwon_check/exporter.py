@@ -30,7 +30,7 @@ STATUS_FILL = {
 }
 
 CRITERIA = (
-    "기준: 공급가(액) 기준, 단가=금액÷총수량. 바코드는 앞 12자리로 매칭(박스코드 14자리 앞 1·체크숫자 제외). "
+    "기준: 공급가(액) 기준, 단가=금액÷총수량(소수점 반올림). 바코드는 앞 12자리로 매칭(박스코드 14자리 앞 1·체크숫자 제외). "
     "같은 일자+바코드는 합산, 합산 결과 수량·금액이 모두 0인 건은 제외. 금액차 ±{tol:g}원 이내는 일치."
 )
 CRITERIA2 = "※ 일자가 다르지만 바코드가 같은 건(±{win}일, 양쪽 한쪽에만 있던 건)은 한 줄로 묶고 거래처 일자 열에 표시"
@@ -62,7 +62,7 @@ class _Formats:
         self.date = f(num_format="yyyy-mm-dd", align="center")
         self.int = f(num_format="#,##0;[Red]-#,##0;-")
         self.money = f(num_format="#,##0;[Red]-#,##0;-")
-        self.unit = f(num_format="#,##0.0")
+        self.unit = f(num_format="#,##0")
         self.pct = f(num_format="0.0%")
         self.center = f(align="center")
         self.rows = f(font_color="#8C8C8C", font_size=9)
@@ -154,13 +154,13 @@ def _write_compare(ws, fmts: _Formats, res: CompareResult, ledger_name: str, tol
         if r.l_qty is not None:
             ws.write_number(x, 3, r.l_qty, fmts.int)
             ws.write_number(x, 5, r.l_amt, fmts.money)
-        ws.write_formula(x, 4, f'=IF(N(D{n})=0,"",F{n}/D{n})', fmts.unit, r.l_unit if r.l_unit is not None else "")
+        ws.write_formula(x, 4, f'=IF(N(D{n})=0,"",ROUND(F{n}/D{n},0))', fmts.unit, r.l_unit if r.l_unit is not None else "")
         if r.v_qty is not None:
             ws.write_number(x, 6, r.v_qty, fmts.int)
             ws.write_number(x, 8, r.v_amt, fmts.money)
-        ws.write_formula(x, 7, f'=IF(N(G{n})=0,"",I{n}/G{n})', fmts.unit, r.v_unit if r.v_unit is not None else "")
+        ws.write_formula(x, 7, f'=IF(N(G{n})=0,"",ROUND(I{n}/G{n},0))', fmts.unit, r.v_unit if r.v_unit is not None else "")
         ws.write_formula(x, 9, f"=N(D{n})-N(G{n})", fmts.int, r.qty_diff)
-        ws.write_formula(x, 10, f"=N(F{n})-N(I{n})", fmts.money, round(r.amt_diff, 2))
+        ws.write_formula(x, 10, f"=N(F{n})-N(I{n})", fmts.money, r.amt_diff)
         ws.write_formula(
             x, 11,
             f'=IF(D{n}="","거래처만",IF(G{n}="","동원만",IF(J{n}<>0,"수량차이",IF(ABS(K{n})<={tol:g},"일치","단가차이"))))',

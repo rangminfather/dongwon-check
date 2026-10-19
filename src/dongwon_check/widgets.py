@@ -10,7 +10,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPai
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from . import theme
-from .engine import ResultRow
+from .engine import ResultRow, round_won
 
 EXCEL_EXT = (".xlsx", ".xlsm", ".xls")
 
@@ -211,12 +211,11 @@ COLUMNS = ["일자", "바코드", "상품명", "동원 수량", "동원 단가",
 NUMERIC = {3, 4, 5, 6, 7, 8, 9, 10}
 
 
-def _fmt(v, digits=0):
+def _fmt(v):
+    """숫자는 소수점 없이 반올림해 보여 준다."""
     if v is None:
         return ""
-    if digits:
-        return f"{v:,.{digits}f}"
-    return f"{v:,.0f}" if abs(v - round(v)) < 1e-9 else f"{v:,.2f}"
+    return f"{round_won(v):,.0f}"
 
 
 class ResultModel(QAbstractTableModel):
@@ -262,8 +261,6 @@ class ResultModel(QAbstractTableModel):
             if c in NUMERIC:
                 if c in (9, 10) and not v:
                     return "–"
-                if c in (4, 7) and v is not None and abs(v - round(v)) > 1e-9:
-                    return _fmt(v, 1)
                 return _fmt(v)
             return v
         if role == Qt.UserRole:  # 정렬용 원값

@@ -152,10 +152,18 @@ def test_matches_manual_result():
     L = E.parse_ledger(sheets["동원"])
     V = E.parse_vendor(sheets["거래처"], period=(2026, 9))
     res = E.compare(L, V, label="x")
-    assert res.summary.counts == {"일치": 235, "수량차이": 91, "단가차이": 239, "동원만": 140, "거래처만": 76}
+    # 수작업 결과는 235/91/239/140/76. 거래처 공급가액 소수점을 반올림하면서(v1.0.3)
+    # 9/1 풍미봉봉 8,685 vs 8,683.64(차 1.36원) → 8,684(차 1원)로 허용오차 안에 들어 일치로 바뀐 1줄만 다르다.
+    assert res.summary.counts == {"일치": 236, "수량차이": 91, "단가차이": 238, "동원만": 140, "거래처만": 76}
     assert res.summary.l_amt == pytest.approx(30372613)
-    assert res.summary.v_amt == pytest.approx(30243213.6)
+    assert res.summary.v_amt == pytest.approx(30243232)
     assert res.warning == ""  # 같은 매장 자료는 경고 없음
+
+
+def test_round_won_half_up():
+    assert [E.round_won(x) for x in (0.5, 1.5, 2.5, 8683.64, 15184.4, -2.5, 2459.6)] == [1, 2, 3, 8684, 15184, -3, 2460]
+    r = E.ResultRow(None, "k", "n", 3, 8685, 3, 8684)
+    assert (r.l_unit, r.v_unit) == (2895, 2895)  # 2894.67 → 2895
 
 
 def test_affiliation_detection():
