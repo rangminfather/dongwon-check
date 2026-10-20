@@ -40,19 +40,49 @@ def is_newer(remote: str, local: str = __version__) -> bool:
     return parse_version(remote) > parse_version(local)
 
 
-def _context():
-    # 사내망 SSL 검사 장비가 있으면 윈도우 인증서 저장소를 써야 통과된다.
-    ctx = ssl.create_default_context()
+def _contexts():
+    """인증서 확인 방식을 순서대로 돌려준다.
+
+    1) 윈도우 인증서 확인(truststore) — 브라우저와 같은 방식이라 사내 보안장비 인증서,
+       PC에 아직 없는 최상위·중간 인증서 자동 받기까지 된다.
+    2) 파이썬 기본(윈도우 인증서 저장소 목록)  3) certifi 묶음.
+    """
     try:
-        ctx.load_default_certs()
+        import truststore
+
+        yield truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     except Exception:
         pass
-    return ctx
+    yield ssl.create_default_context()
+    try:
+        import certifi
+
+        yield ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+
+
+def _is_cert_error(e: Exception) -> bool:
+    reason = getattr(e, "reason", e)
+    return isinstance(reason, ssl.SSLError) or "CERTIFICATE" in str(e).upper()
 
 
 def _open(url: str, accept: str = "application/vnd.github+json"):
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": f"{APP_NAME_EN}/{__version__}"})
-    return urllib.request.urlopen(req, timeout=TIMEOUT, context=_context())
+    last: Exception | None = None
+    for ctx in _contexts():
+        try:
+            return urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx)
+        except Exception as e:  # noqa: BLE001
+            if not _is_cert_error(e):
+                raise
+            last = e
+    raise last or RuntimeError("인증서를 확인하지 못했습니다")
+
+
+def releases_page() -> str:
+    """브라우저로 직접 받을 때 여는 최신 릴리스 페이지."""
+    return f"https://github.com/{GITHUB_REPO}/releases/latest"
 
 
 def configured() -> bool:

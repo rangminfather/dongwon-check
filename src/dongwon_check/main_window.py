@@ -739,7 +739,18 @@ class MainWindow(QMainWindow):
 
     def _on_update_failed(self, msg: str):
         if self._manual_check:
-            QMessageBox.warning(self, "업데이트 확인 실패", f"GitHub에 연결하지 못했습니다.\n사내망 차단 여부를 확인해 주세요.\n\n{msg}")
+            self._offer_browser("업데이트 확인 실패", "GitHub에 연결하지 못했습니다.", msg)
+
+    def _offer_browser(self, title: str, head: str, msg: str):
+        """프로그램이 직접 못 받으면 브라우저로 설치 파일 페이지를 연다(브라우저는 사내망에서도 대개 열린다)."""
+        box = QMessageBox(QMessageBox.Warning, title,
+                          f"{head}\n[브라우저로 내려받기]를 누르면 설치 파일 페이지가 열립니다.\n"
+                          f"받은 DongwonCheck-Setup 파일을 실행하고 '업데이트'를 고르세요.\n\n{msg}", parent=self)
+        web = box.addButton("브라우저로 내려받기", QMessageBox.AcceptRole)
+        box.addButton("닫기", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is web:
+            QDesktopServices.openUrl(QUrl(updater.releases_page()))
 
     def install_update(self):
         rel = self._release
@@ -762,7 +773,7 @@ class MainWindow(QMainWindow):
                 QApplication.quit()
 
         b.downloaded.connect(finished)
-        b.download_failed.connect(lambda m: (dlg.close(), QMessageBox.warning(self, "업데이트 실패", m)))
+        b.download_failed.connect(lambda m: (dlg.close(), self._offer_browser("업데이트 실패", "설치 파일을 받지 못했습니다.", m)))
 
         def work():
             try:
