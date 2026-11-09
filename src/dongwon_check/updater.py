@@ -12,6 +12,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from dataclasses import dataclass
 
@@ -29,6 +30,7 @@ class Release:
     asset_name: str
     size: int
     page_url: str
+    api_url: str = ""  # 같은 파일의 GitHub API 주소(일반 다운로드 주소가 504일 때도 받아짐)
 
 
 def parse_version(v: str) -> tuple[int, ...]:
@@ -108,22 +110,44 @@ def latest_release() -> Release | None:
         asset_name=asset["name"],
         size=asset.get("size", 0),
         page_url=data.get("html_url", ""),
+        api_url=asset.get("url", ""),
     )
 
 
-def download(rel: Release, progress=None) -> str:
-    """설치 파일을 임시 폴더에 받는다. progress(받은 바이트, 전체 바이트)."""
-    dest = os.path.join(tempfile.gettempdir(), rel.asset_name)
-    with _open(rel.asset_url, accept="application/octet-stream") as resp, open(dest + ".part", "wb") as f:
-        total = int(resp.headers.get("Content-Length") or rel.size or 0)
+ROUNDS = 3  # 주소 전체를 몇 바퀴 돌며 다시 시도할지
+
+
+def _fetch(url: str, dest: str, size: int, progress=None):
+    with _open(url, accept="application/octet-stream") as resp, open(dest + ".part", "wb") as f:
+        total = int(resp.headers.get("Content-Length") or size or 0)
         got = 0
         while chunk := resp.read(256 * 1024):
             f.write(chunk)
             got += len(chunk)
             if progress:
                 progress(got, total)
-    os.replace(dest + ".part", dest)
-    return dest
+
+
+def download(rel: Release, progress=None, sleep=time.sleep) -> str:
+    """설치 파일을 임시 폴더에 받는다. progress(받은 바이트, 전체 바이트).
+
+    GitHub 일반 다운로드 주소(github.com/.../releases/download)가 504 등으로 잠시 막히는 일이 있어
+    API 주소 → 일반 주소 순서로 시도하고, 둘 다 안 되면 잠깐 쉬었다가 몇 번 더 시도한다.
+    """
+    dest = os.path.join(tempfile.gettempdir(), rel.asset_name)
+    urls = [u for u in (rel.api_url, rel.asset_url) if u]
+    last: Exception | None = None
+    for n in range(ROUNDS):
+        if n:
+            sleep(3 * n)
+        for url in urls:
+            try:
+                _fetch(url, dest, rel.size, progress)
+                os.replace(dest + ".part", dest)
+                return dest
+            except Exception as e:  # noqa: BLE001
+                last = e
+    raise last or RuntimeError("설치 파일 주소가 없습니다")
 
 
 def run_installer(path: str):

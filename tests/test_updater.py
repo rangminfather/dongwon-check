@@ -48,3 +48,51 @@ def test_other_errors_are_not_retried(monkeypatch):
 def test_windows_trust_comes_first():
     first = next(U._contexts())
     assert type(first).__module__.startswith("truststore")
+
+
+def _rel():
+    return U.Release("9.9.9", "", "https://github.com/x/releases/download/a.exe", "DongwonCheck-Setup-test.exe", 3, "",
+                     api_url="https://api.github.com/x/assets/1")
+
+
+class _Resp:
+    headers = {"Content-Length": "3"}
+
+    def __init__(self):
+        self.data = [b"abc", b""]
+
+    def read(self, n):
+        return self.data.pop(0)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_download_uses_api_url_then_browser_url_and_retries(monkeypatch, tmp_path):
+    tried = []
+
+    def fake_open(url, accept=""):
+        tried.append(url)
+        if len(tried) < 4:  # 첫 바퀴 두 주소 모두 504, 둘째 바퀴 API 주소도 504
+            raise urllib.error.HTTPError(url, 504, "Gateway Time-out", {}, None)
+        return _Resp()
+
+    monkeypatch.setattr(U, "_open", fake_open)
+    monkeypatch.setattr(U.tempfile, "gettempdir", lambda: str(tmp_path))
+    rel = _rel()
+    path = U.download(rel, sleep=lambda s: None)
+    assert tried == [rel.api_url, rel.asset_url, rel.api_url, rel.asset_url]
+    assert open(path, "rb").read() == b"abc"
+
+
+def test_download_gives_up_after_rounds(monkeypatch, tmp_path):
+    def fake_open(url, accept=""):
+        raise urllib.error.HTTPError(url, 504, "Gateway Time-out", {}, None)
+
+    monkeypatch.setattr(U, "_open", fake_open)
+    monkeypatch.setattr(U.tempfile, "gettempdir", lambda: str(tmp_path))
+    with pytest.raises(urllib.error.HTTPError):
+        U.download(_rel(), sleep=lambda s: None)
