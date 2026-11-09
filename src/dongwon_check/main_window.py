@@ -212,9 +212,10 @@ class ResultPanel(QWidget):
         rate = Kpi("확인할 줄", "#C62828" if need else "#1E7B3A", "#FFF5F5" if need else "#EEF8F1")
         rate.set(f"{need:,}건" if need else "없음 ✔", f"전체 {s.total:,}줄 · 일치 {s.counts['일치']:,}줄")
         kpis.addWidget(rate)
-        for title, lv, vv in (("총수량", s.l_qty, s.v_qty), ("공급가 금액", s.l_amt, s.v_amt)):
-            k = Kpi(f"{title} 차이 (동원−거래처)", "#C62828" if abs(lv - vv) > 1 else "#1E7B3A")
-            k.set(f"{lv - vv:+,.0f}", f"동원 {lv:,.0f} · 거래처 {vv:,.0f}")
+        for title, lv, vv, amt in (("총수량", s.l_qty, s.v_qty, False), ("공급가 금액", s.l_amt, s.v_amt, True)):
+            d = (vv - lv) if amt else (lv - vv)  # 금액차는 거래처−동원, 수량차는 동원−거래처
+            k = Kpi(f"{title} 차이 ({'거래처−동원' if amt else '동원−거래처'})", "#C62828" if abs(d) > 1 else "#1E7B3A")
+            k.set(f"{d:+,.0f}", f"동원 {lv:,.0f} · 거래처 {vv:,.0f}")
             kpis.addWidget(k)
         lay.addLayout(kpis)
 

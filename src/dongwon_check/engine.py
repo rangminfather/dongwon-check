@@ -548,7 +548,8 @@ class ResultRow:
 
     @property
     def amt_diff(self) -> float:
-        return (self.l_amt or 0) - (self.v_amt or 0)
+        # 금액차 = 거래처 금액 − 동원 금액 (v1.0.5부터 · 수량차는 동원−거래처 그대로)
+        return (self.v_amt or 0) - (self.l_amt or 0)
 
 
 def _aggregate(recs: list[Record]) -> dict[tuple, Agg]:

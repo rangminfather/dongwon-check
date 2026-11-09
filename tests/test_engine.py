@@ -101,7 +101,10 @@ def test_footer_format_and_reconcile():
     assert by[("8801047529002", dt.date(2026, 9, 2))].status == "수량차이"
     ret = by[("8801047513162", dt.date(2026, 9, 4))]
     assert ret.status == "일치" and ret.v_date == dt.date(2026, 9, 2) and ret.memo == "거래처 일자 -2일"
-    assert by[("8801047529545", dt.date(2026, 9, 5))].status == "단가차이"
+    price = by[("8801047529545", dt.date(2026, 9, 5))]
+    assert price.status == "단가차이"
+    assert price.amt_diff == price.v_amt - price.l_amt  # 금액차 = 거래처 − 동원 (v1.0.5)
+    assert price.qty_diff == price.l_qty - price.v_qty  # 수량차 = 동원 − 거래처 (그대로)
     assert by[("8801047557616", dt.date(2026, 9, 6))].status == "동원만"
     new = next(r for r in res.rows if r.key == "880104711111")
     assert (new.date, new.status) == (dt.date(2026, 9, 5), "거래처만")

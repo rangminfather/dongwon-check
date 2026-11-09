@@ -110,14 +110,14 @@ def _write_compare(ws, fmts: _Formats, res: CompareResult, ledger_name: str, tol
 
     s = res.summary
     ws.write_row(3, 0, ["구분", "동원", "거래처", "차이"], fmts.head)
-    ws.write(4, 0, "총수량", fmts.label)
+    ws.write(4, 0, "총수량(동원-거래처)", fmts.label)
     ws.write_formula(4, 1, f"=SUM({rng('D')})", fmts.sum_int, s.l_qty)
     ws.write_formula(4, 2, f"=SUM({rng('G')})", fmts.sum_int, s.v_qty)
     ws.write_formula(4, 3, "=B5-C5", fmts.sum_int, s.l_qty - s.v_qty)
-    ws.write(5, 0, "금액(공급가)", fmts.label)
+    ws.write(5, 0, "금액(거래처-동원)", fmts.label)
     ws.write_formula(5, 1, f"=SUM({rng('F')})", fmts.sum_int, s.l_amt)
     ws.write_formula(5, 2, f"=SUM({rng('I')})", fmts.sum_int, s.v_amt)
-    ws.write_formula(5, 3, "=B6-C6", fmts.sum_int, s.l_amt - s.v_amt)
+    ws.write_formula(5, 3, "=C6-B6", fmts.sum_int, s.v_amt - s.l_amt)
     ws.write_row(3, 5, ["비고", "건수"], fmts.head)
     for i, st in enumerate(STATUSES):
         ws.write(4 + i, 5, st, fmts.chip[st])
@@ -137,7 +137,7 @@ def _write_compare(ws, fmts: _Formats, res: CompareResult, ledger_name: str, tol
         ws.write(7, 9, res.warning, fmts.warn)
 
     headers = ["일자", "바코드", "상품명", "동원\n총수량", "동원\n단가", "동원\n금액", "거래처\n총수량", "거래처\n단가",
-               "거래처\n금액", "수량차\n(동원-거래처)", "금액차\n(동원-거래처)", "비고", "거래처\n일자", "메모",
+               "거래처\n금액", "수량차\n(동원-거래처)", "금액차\n(거래처-동원)", "비고", "거래처\n일자", "메모",
                "동원\n원본행", "거래처\n원본행"]
     ws.write_row(10, 0, headers, fmts.head)
     ws.set_row(10, 30)
@@ -160,7 +160,7 @@ def _write_compare(ws, fmts: _Formats, res: CompareResult, ledger_name: str, tol
             ws.write_number(x, 8, r.v_amt, fmts.money)
         ws.write_formula(x, 7, f'=IF(N(G{n})=0,"",ROUND(I{n}/G{n},0))', fmts.unit, r.v_unit if r.v_unit is not None else "")
         ws.write_formula(x, 9, f"=N(D{n})-N(G{n})", fmts.int, r.qty_diff)
-        ws.write_formula(x, 10, f"=N(F{n})-N(I{n})", fmts.money, r.amt_diff)
+        ws.write_formula(x, 10, f"=N(I{n})-N(F{n})", fmts.money, r.amt_diff)
         ws.write_formula(
             x, 11,
             f'=IF(D{n}="","거래처만",IF(G{n}="","동원만",IF(J{n}<>0,"수량차이",IF(ABS(K{n})<={tol:g},"일치","단가차이"))))',
@@ -193,7 +193,7 @@ def _write_summary(ws, fmts: _Formats, results: list[CompareResult], ledger: Par
     ws.write(1, 0, f"{branch + ' · ' if branch else ''}기준 원장: {os.path.basename(ledger_path)}  ·  "
                    f"작성 {dt.datetime.now():%Y-%m-%d %H:%M}  ·  {APP_NAME} v{__version__}", fmts.subtitle)
     heads = ["거래처(소속)", "파일 · 시트", "원장 판매처", "방식", "총 건수", *STATUSES, "확인 필요",
-             "동원 금액", "거래처 금액", "금액차", "참고", "거래처 소속(감지)"]
+             "동원 금액", "거래처 금액", "금액차(거래처-동원)", "참고", "거래처 소속(감지)"]
     ws.write_row(3, 0, heads, fmts.head)
     ws.set_row(3, 22)
     for i, res in enumerate(results):
@@ -209,7 +209,7 @@ def _write_summary(ws, fmts: _Formats, results: list[CompareResult], ledger: Par
         ws.write_formula(r, 10, f"={xl_rowcol_to_cell(r, 4)}-{xl_rowcol_to_cell(r, 5)}", fmts.sum_int, s.to_check)
         ws.write_number(r, 11, s.l_amt, fmts.sum_int)
         ws.write_number(r, 12, s.v_amt, fmts.sum_int)
-        ws.write_number(r, 13, s.l_amt - s.v_amt, fmts.sum_int)
+        ws.write_number(r, 13, s.v_amt - s.l_amt, fmts.sum_int)
         ws.write(r, 14, " · ".join(([f"⚠ {res.warning}"] if res.warning else []) + res.notes), fmts.warn if res.warning else fmts.note)
         ws.write(r, 15, res.affiliation.label())
     for col, w in zip(range(16), [28, 18, 22, 8, 8, 8, 9, 9, 8, 9, 8, 14, 14, 12, 70, 40]):
